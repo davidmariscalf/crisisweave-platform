@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ipaddress
 import os
 import threading
 import time
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -16,6 +16,7 @@ from crisisweave_platform import (
     WorksiteClient,
     _parse_allowed_origins,
 )
+from server_runtime import BoundedThreadingHTTPServer
 
 
 class MetricsRegistry:
@@ -49,7 +50,7 @@ class MetricsRegistry:
             if status >= 500:
                 self.server_errors += 1
 
-    def render(self, *, db_health: dict, worksites_ok: bool) -> str:
+    def render(self, *, db_health: dict, worksites_ok: bool, worker_limit: int) -> str:
         with self._lock:
             status = dict(self.status_classes)
             authn = self.authentication_failures
@@ -64,6 +65,9 @@ class MetricsRegistry:
             "# HELP crisisweave_platform_uptime_seconds Process uptime in seconds.",
             "# TYPE crisisweave_platform_uptime_seconds gauge",
             f"crisisweave_platform_uptime_seconds {uptime:.3f}",
+            "# HELP crisisweave_platform_http_worker_limit Configured HTTP concurrency ceiling.",
+            "# TYPE crisisweave_platform_http_worker_limit gauge",
+            f"crisisweave_platform_http_worker_limit {int(worker_limit)}",
             "# HELP crisisweave_platform_http_responses_total HTTP responses by status class.",
             "# TYPE crisisweave_platform_http_responses_total counter",
         ]
@@ -95,6 +99,7 @@ class MetricsRegistry:
 
 class MetricsPlatformHandler(PlatformHandler):
     metrics: MetricsRegistry
+    trust_proxy = False
 
     def _send(self, status, payload, headers=None):
         self.metrics.observe(status)
@@ -104,8 +109,44 @@ class MetricsPlatformHandler(PlatformHandler):
         self.metrics.observe(200)
         return super()._html(text)
 
+    def _client_ip(self) -> str:
+        direct = str(self.client_address[0])
+        if not self.trust_proxy:
+            return direct
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        candidate = forwarded.split(",", 1)[0].strip() if forwarded else ""
+        if not candidate:
+            candidate = self.headers.get("X-Real-IP", "").strip()
+        try:
+            return str(ipaddress.ip_address(candidate)) if candidate else direct
+        except ValueError:
+            return direct
+
+    def _auth(self, permission):
+        principal = self._principal()
+        key = "token:" + principal["token_id"] if principal else "ip:" + self._client_ip()
+        ok, retry = self.limiter.allow(key)
+        if not ok:
+            self._send(429, {"error": "rate limit exceeded"}, {"Retry-After": str(retry)})
+            return None
+        if not principal:
+            self._send(401, {"error": "authentication required"})
+            return None
+        if not self.db.allowed(principal, permission):
+            self.db.audit(
+                "authorisation", "denied", principal["organisation_id"], principal["id"],
+                self.path, {"permission": permission},
+            )
+            self._send(403, {"error": "permission denied"})
+            return None
+        return principal
+
     def _send_metrics(self):
-        text = self.metrics.render(db_health=self.db.health(), worksites_ok=self.worksites.health())
+        text = self.metrics.render(
+            db_health=self.db.health(),
+            worksites_ok=self.worksites.health(),
+            worker_limit=self.server.max_workers,
+        )
         body = text.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -121,9 +162,17 @@ class MetricsPlatformHandler(PlatformHandler):
         return super().do_GET()
 
 
+def _env_bool(name: str, default=False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_metrics_server(
     db, worksites, host="127.0.0.1", port=8080, rate_limit=120,
     allowed_origin=None, verified_feed=None, alerts_feed=None, admin_html=None,
+    trust_proxy=False, max_workers=64, socket_timeout=10.0,
 ):
     handler = type("BoundMetricsPlatformHandler", (MetricsPlatformHandler,), {})
     handler.db = db
@@ -134,7 +183,12 @@ def build_metrics_server(
     handler.alerts_feed = alerts_feed
     handler.admin_html = admin_html
     handler.metrics = MetricsRegistry()
-    return ThreadingHTTPServer((host, int(port)), handler)
+    handler.trust_proxy = bool(trust_proxy)
+    return BoundedThreadingHTTPServer(
+        (host, int(port)), handler,
+        max_workers=max_workers,
+        socket_timeout=socket_timeout,
+    )
 
 
 def main() -> int:
@@ -155,6 +209,9 @@ def main() -> int:
         os.getenv("CW_VERIFIED_FEED") or None,
         os.getenv("CW_ALERTS_FEED") or None,
         admin.read_text(encoding="utf-8") if admin.is_file() else None,
+        trust_proxy=_env_bool("CW_TRUST_PROXY", False),
+        max_workers=int(os.getenv("CW_MAX_HTTP_WORKERS", "64")),
+        socket_timeout=float(os.getenv("CW_HTTP_SOCKET_TIMEOUT", "10")),
     )
     print(f"CrisisWeave instrumented platform listening on http://{server.server_address[0]}:{server.server_address[1]}")
     try:
