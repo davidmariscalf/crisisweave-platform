@@ -2,7 +2,7 @@
 
 Deployment and access-control layer for the public CrisisWeave stack.
 
-This repository does **not** replace the specialist modules. It provides the boundary a deployable installation needs around them: organisation identity, role-based access control, token handling, private-data separation, an API gateway, audit records, rate limiting, health/readiness checks, backup verification and container configuration.
+This repository does **not** replace the specialist modules. It provides the boundary a deployable installation needs around them: organisation identity, role-based access control, token handling, private-data separation, an API gateway, audit records, rate limiting, health/readiness checks, backup verification, privacy-safe metrics and container configuration.
 
 It is still an engineering MVP, not a certified humanitarian platform.
 
@@ -24,6 +24,7 @@ It is still an engineering MVP, not a certified humanitarian platform.
 - request IDs and baseline security headers
 - graceful `502` handling when the worksite service is unavailable
 - SQLite online backups with SHA256 manifest and integrity checks
+- privacy-safe Prometheus metrics through the instrumented server
 - Docker baseline and a minimal `/admin` console
 - published `openapi.yaml`
 - no third-party Python packages
@@ -50,6 +51,14 @@ python crisisweave_platform.py create-principal coord-1 --org demo-relief --name
 python crisisweave_platform.py issue-token coord-1
 python crisisweave_platform.py serve
 ```
+
+For the same gateway plus Prometheus-compatible aggregate metrics, run:
+
+```bash
+python prometheus_server.py
+```
+
+The Docker image uses `prometheus_server.py` by default.
 
 CLI-issued tokens expire after 24 hours by default. Use `--ttl-hours 8` for a shorter token or `--ttl-hours 0` only for an explicitly non-expiring development token.
 
@@ -79,13 +88,14 @@ Reactivation does not restore revoked tokens; issue a new token afterwards.
 
 ## API
 
-The machine-readable contract is in [`openapi.yaml`](./openapi.yaml).
+The machine-readable application contract is in [`openapi.yaml`](./openapi.yaml).
 
 Unauthenticated:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /admin`
 - trusted-origin `OPTIONS` preflight
+- `GET /metrics` when running `prometheus_server.py`
 
 Authenticated:
 - `GET /api/v1/me`
@@ -107,6 +117,21 @@ Coordinator/admin:
 The gateway ignores a client-supplied worksite `actor` and injects authenticated organisation/principal identity.
 
 Private records return an `ETag` equal to their integer version. Clients that need safe concurrent updates can send that version with `If-Match`. A stale version returns `409` instead of silently overwriting newer data.
+
+## Prometheus metrics
+
+`prometheus_server.py` is a drop-in instrumented server using the same `PlatformHandler`, database and worksite client. `/metrics` exposes only low-cardinality aggregate data:
+
+- process uptime and fixed build version
+- response counts by `2xx`/`3xx`/`4xx`/`5xx`
+- aggregate authentication failures, authorisation denials and rate limiting
+- aggregate 5xx count
+- platform/private database health
+- worksite-service health
+
+It deliberately does **not** use labels for principal IDs, organisations, worksite IDs, token prefixes, paths, query strings or source URLs.
+
+`/metrics` is unauthenticated so Prometheus can scrape it on a private application network. A public reverse proxy should block this route; the Caddy profile in `crisisweave-infra` does so explicitly.
 
 ## Feeds
 
@@ -131,7 +156,7 @@ Create online SQLite backups:
 python crisisweave_platform.py backup --out ./backups
 ```
 
-Each run now writes a JSON manifest with SHA256 hashes and performs `PRAGMA integrity_check` before reporting success.
+Each run writes a JSON manifest with SHA256 hashes and performs `PRAGMA integrity_check` before reporting success.
 
 Verify a backup again before restoration:
 
@@ -147,10 +172,10 @@ Treat private backups with the same controls as the private database.
 python -W error::ResourceWarning -m unittest discover -s tests -v
 ```
 
-The regression suite covers RBAC, token hashing, token expiry/revocation, principal deactivation, organisation-private-data isolation, optimistic concurrency, backup integrity, CORS preflight, request security headers, actor-spoof prevention and upstream outage handling.
+The regression suite covers RBAC, token hashing, token expiry/revocation, principal deactivation, organisation-private-data isolation, optimistic concurrency, backup integrity, CORS preflight, request security headers, actor-spoof prevention, upstream outage handling and privacy-safe metrics.
 
 ## Production gaps
 
-A real deployment still needs an external identity provider/MFA, managed encrypted storage, shared authoritative state for multi-instance operation, distributed rate limiting, central monitoring, tested off-host disaster recovery, retention/deletion governance, organisation onboarding/offboarding, privacy/legal review and integrations with authoritative recovery systems.
+The repository now has a tested metrics surface, but a real deployment still needs an external identity provider/MFA, managed encrypted storage, shared authoritative state for multi-instance operation, distributed rate limiting, a deployed central monitoring stack, tested off-host disaster recovery, retention/deletion governance, organisation onboarding/offboarding, privacy/legal review and integrations with authoritative recovery systems.
 
 Do not represent this repository as evidence that CrisisWeave is approved for emergency dispatch or production humanitarian use.
