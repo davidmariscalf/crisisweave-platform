@@ -2,7 +2,7 @@
 
 Deployment and access-control layer for the public CrisisWeave stack.
 
-This repository does **not** replace the specialist modules. It provides the boundary a deployable installation needs around them: organisation identity, role-based access control, token handling, private-data separation, an API gateway, audit records, rate limiting, health/readiness checks and container configuration.
+This repository does **not** replace the specialist modules. It provides the boundary a deployable installation needs around them: organisation identity, role-based access control, token handling, private-data separation, an API gateway, audit records, rate limiting, health/readiness checks, backup verification and container configuration.
 
 It is still an engineering MVP, not a certified humanitarian platform.
 
@@ -10,15 +10,22 @@ It is still an engineering MVP, not a certified humanitarian platform.
 
 - roles: `admin`, `coordinator`, `volunteer`, `viewer`
 - bearer tokens stored only as HMAC-SHA256 digests
+- 24 hour token lifetime by default for CLI-issued credentials, configurable with `CW_TOKEN_TTL_HOURS`
+- token listing and revocation plus principal activation/deactivation
 - organisation-scoped private data and permissions
+- optimistic concurrency for private records using `If-Match`/record versions
 - gateway to `crisisweave-worksites`
 - authenticated verified-incident and alert feeds
 - coordinator-only worksite mutations
 - private JSON records in a separate SQLite database
-- append-only application audit records
-- rate limiting, `/healthz` and `/readyz`
-- SQLite online backups
+- append-only application audit records with secret-field redaction
+- per-process rate limiting, `/healthz` and `/readyz`
+- exact-origin CORS preflight support for authenticated browser clients
+- request IDs and baseline security headers
+- graceful `502` handling when the worksite service is unavailable
+- SQLite online backups with SHA256 manifest and integrity checks
 - Docker baseline and a minimal `/admin` console
+- published `openapi.yaml`
 - no third-party Python packages
 
 ## Security boundary
@@ -27,7 +34,9 @@ It is still an engineering MVP, not a certified humanitarian platform.
 
 The private SQLite file is separated and file/directory permissions are tightened where the OS supports them. **This is not application-level encryption.** Production survivor data needs encrypted storage, managed keys/KMS, protected backups, retention/deletion rules and a privacy review.
 
-Bearer tokens are used instead of cookies. Cross-origin access should be enabled only for an explicitly trusted origin. The built-in rate limiter is per process; multi-instance deployments need shared rate limiting.
+Bearer tokens are used instead of cookies. Cross-origin access is accepted only from exact origins configured in `CW_ALLOWED_ORIGIN`; multiple origins can be comma separated. Do not use a wildcard for the authenticated API.
+
+The built-in rate limiter is per process. Multi-instance deployments need a shared limiter and shared authoritative data store.
 
 ## Quick start
 
@@ -42,14 +51,41 @@ python crisisweave_platform.py issue-token coord-1
 python crisisweave_platform.py serve
 ```
 
-The token is shown once. Store it securely.
+CLI-issued tokens expire after 24 hours by default. Use `--ttl-hours 8` for a shorter token or `--ttl-hours 0` only for an explicitly non-expiring development token.
+
+The raw token is shown once. Store it securely.
+
+## Token lifecycle
+
+List issued token metadata without revealing token values:
+
+```bash
+python crisisweave_platform.py list-tokens coord-1
+```
+
+Revoke one token by its token ID:
+
+```bash
+python crisisweave_platform.py revoke-token tok_...
+```
+
+Deactivate a principal and revoke all of its current tokens:
+
+```bash
+python crisisweave_platform.py deactivate-principal coord-1
+```
+
+Reactivation does not restore revoked tokens; issue a new token afterwards.
 
 ## API
+
+The machine-readable contract is in [`openapi.yaml`](./openapi.yaml).
 
 Unauthenticated:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /admin`
+- trusted-origin `OPTIONS` preflight
 
 Authenticated:
 - `GET /api/v1/me`
@@ -65,10 +101,12 @@ Coordinator/admin:
 - `POST /api/v1/worksites/<id>/assign`
 - `POST /api/v1/worksites/<id>/release`
 - `POST /api/v1/worksites/<id>/transition`
-- `GET|POST /api/v1/private/<key>`
+- `GET|POST|DELETE /api/v1/private/<key>`
 - `GET /api/v1/audit?limit=100`
 
 The gateway ignores a client-supplied worksite `actor` and injects authenticated organisation/principal identity.
+
+Private records return an `ETag` equal to their integer version. Clients that need safe concurrent updates can send that version with `If-Match`. A stale version returns `409` instead of silently overwriting newer data.
 
 ## Feeds
 
@@ -85,10 +123,20 @@ Volunteers intentionally do not receive incident-intelligence access by default.
 
 Open `/admin`, enter a bearer token, and connect. The token is kept only in page memory, not in cookies or `localStorage`.
 
-## Backups
+## Backups and restore checks
+
+Create online SQLite backups:
 
 ```bash
 python crisisweave_platform.py backup --out ./backups
+```
+
+Each run now writes a JSON manifest with SHA256 hashes and performs `PRAGMA integrity_check` before reporting success.
+
+Verify a backup again before restoration:
+
+```bash
+python crisisweave_platform.py verify-backup ./backups/platform-YYYYMMDDTHHMMSSZ.sqlite3
 ```
 
 Treat private backups with the same controls as the private database.
@@ -99,8 +147,10 @@ Treat private backups with the same controls as the private database.
 python -W error::ResourceWarning -m unittest discover -s tests -v
 ```
 
+The regression suite covers RBAC, token hashing, token expiry/revocation, principal deactivation, organisation-private-data isolation, optimistic concurrency, backup integrity, CORS preflight, request security headers, actor-spoof prevention and upstream outage handling.
+
 ## Production gaps
 
-A real deployment still needs an external identity provider or rigorous account lifecycle, TLS, managed encrypted storage, distributed rate limiting when scaled, central monitoring, tested restores, retention/deletion policy, token/key rotation procedures, organisation onboarding/offboarding, privacy/legal review, and integrations with authoritative recovery systems.
+A real deployment still needs an external identity provider/MFA, managed encrypted storage, shared authoritative state for multi-instance operation, distributed rate limiting, central monitoring, tested off-host disaster recovery, retention/deletion governance, organisation onboarding/offboarding, privacy/legal review and integrations with authoritative recovery systems.
 
 Do not represent this repository as evidence that CrisisWeave is approved for emergency dispatch or production humanitarian use.
