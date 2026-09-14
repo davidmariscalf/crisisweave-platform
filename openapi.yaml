@@ -1,0 +1,175 @@
+openapi: 3.1.0
+info:
+  title: CrisisWeave Platform API
+  version: 0.2.0
+  description: >-
+    Authenticated deployment boundary for CrisisWeave. This API is decision support
+    and coordination software, not an emergency dispatch authority.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local development
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      security: []
+      summary: Process and database health
+      responses:
+        '200': {description: Healthy}
+        '503': {description: Database unavailable}
+  /readyz:
+    get:
+      security: []
+      summary: Deployment readiness including worksite service
+      responses:
+        '200': {description: Ready}
+        '503': {description: A required dependency is unavailable}
+  /api/v1/me:
+    get:
+      summary: Current authenticated principal
+      responses:
+        '200': {description: Principal metadata}
+        '401': {description: Authentication required}
+  /api/v1/organisation:
+    get:
+      summary: Current principal organisation
+      responses:
+        '200': {description: Organisation metadata}
+  /api/v1/incidents:
+    get:
+      summary: Verified incident feed
+      responses:
+        '200': {description: Incident collection}
+        '403': {description: Role does not permit incident access}
+        '503': {description: Feed unavailable}
+  /api/v1/alerts:
+    get:
+      summary: Alert-rule matches
+      responses:
+        '200': {description: Alert collection}
+        '403': {description: Role does not permit alert access}
+        '503': {description: Feed unavailable}
+  /api/v1/worksites:
+    get:
+      summary: Operational worksite collection
+      responses:
+        '200': {description: Worksite collection}
+        '502': {description: Worksite service unavailable}
+  /api/v1/worksites/{id}:
+    parameters:
+      - $ref: '#/components/parameters/WorksiteId'
+    get:
+      summary: One operational worksite
+      responses:
+        '200': {description: Worksite}
+        '502': {description: Worksite service unavailable}
+  /api/v1/worksites/{id}/assign:
+    parameters:
+      - $ref: '#/components/parameters/WorksiteId'
+    post:
+      summary: Assign a ready worksite to a team
+      description: The gateway ignores any client supplied actor and injects authenticated identity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team_id]
+              properties:
+                team_id: {type: string}
+      responses:
+        '200': {description: Assignment accepted}
+        '403': {description: Coordinator permission required}
+        '409': {description: Assignment conflict from worksite service}
+        '502': {description: Worksite service unavailable}
+  /api/v1/worksites/{id}/release:
+    parameters:
+      - $ref: '#/components/parameters/WorksiteId'
+    post:
+      summary: Release an assigned worksite
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Released}
+        '403': {description: Coordinator permission required}
+  /api/v1/worksites/{id}/transition:
+    parameters:
+      - $ref: '#/components/parameters/WorksiteId'
+    post:
+      summary: Apply an allowed worksite state transition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state: {type: string}
+                note: {type: string, maxLength: 1000}
+      responses:
+        '200': {description: Transition accepted}
+        '403': {description: Coordinator permission required}
+  /api/v1/private/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: {type: string}
+      - name: If-Match
+        in: header
+        required: false
+        description: Integer record version for optimistic concurrency.
+        schema: {type: integer, minimum: 0}
+    get:
+      summary: Read organisation scoped private record
+      responses:
+        '200':
+          description: Private record
+          headers:
+            ETag:
+              schema: {type: string}
+        '403': {description: Private read permission required}
+        '404': {description: Record not found}
+    post:
+      summary: Create or update organisation scoped private record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200': {description: Stored}
+        '409': {description: Version conflict}
+    delete:
+      summary: Delete organisation scoped private record
+      responses:
+        '200': {description: Deleted}
+        '404': {description: Record not found}
+        '409': {description: Version conflict}
+  /api/v1/audit:
+    get:
+      summary: Organisation scoped application audit records
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 500, default: 100}
+      responses:
+        '200': {description: Audit collection}
+        '403': {description: Audit permission required}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: CrisisWeave token
+  parameters:
+    WorksiteId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
