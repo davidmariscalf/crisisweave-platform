@@ -4,7 +4,8 @@ info:
   version: 0.2.0
   description: >-
     Authenticated deployment boundary for CrisisWeave. This API is decision support
-    and coordination software, not an emergency dispatch authority.
+    and coordination software, not an emergency dispatch authority. The optional
+    instrumented server also exposes a private-network Prometheus metrics endpoint.
 servers:
   - url: http://127.0.0.1:8080
     description: Local development
@@ -25,6 +26,20 @@ paths:
       responses:
         '200': {description: Ready}
         '503': {description: A required dependency is unavailable}
+  /metrics:
+    get:
+      security: []
+      summary: Low-cardinality Prometheus metrics when using prometheus_server.py
+      description: >-
+        Intended for scraping from a private application network. Public edge
+        configurations should block this route. Metrics do not label principals,
+        organisations, worksites, paths, query strings or token data.
+      responses:
+        '200':
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema: {type: string}
   /api/v1/me:
     get:
       summary: Current authenticated principal
