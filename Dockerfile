@@ -5,10 +5,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CW_DB=/data/platform.db \
     CW_PRIVATE_DB=/data/private.db \
     CW_HOST=0.0.0.0 \
-    CW_PORT=8080
+    CW_PORT=8080 \
+    CW_MAX_HTTP_WORKERS=64 \
+    CW_HTTP_SOCKET_TIMEOUT=10
 
 WORKDIR /app
-COPY crisisweave_platform.py prometheus_server.py admin.html /app/
+COPY crisisweave_platform.py prometheus_server.py server_runtime.py admin.html /app/
 RUN useradd --create-home --uid 10001 crisisweave && mkdir -p /data /feeds && chown -R crisisweave:crisisweave /data /app
 USER crisisweave
 VOLUME ["/data"]
