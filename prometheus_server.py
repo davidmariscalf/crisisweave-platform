@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -50,7 +51,15 @@ class MetricsRegistry:
             if status >= 500:
                 self.server_errors += 1
 
-    def render(self, *, db_health: dict, worksites_ok: bool, worker_limit: int) -> str:
+    def render(
+        self,
+        *,
+        db_health: dict,
+        worksites_ok: bool,
+        worker_limit: int,
+        disk_total_bytes: int,
+        disk_free_bytes: int,
+    ) -> str:
         with self._lock:
             status = dict(self.status_classes)
             authn = self.authentication_failures
@@ -58,6 +67,9 @@ class MetricsRegistry:
             limited = self.rate_limited
             errors = self.server_errors
         uptime = max(0.0, time.monotonic() - self.started)
+        disk_total = max(0, int(disk_total_bytes))
+        disk_free = max(0, int(disk_free_bytes))
+        disk_free_ratio = (disk_free / disk_total) if disk_total else 0.0
         lines = [
             "# HELP crisisweave_platform_info Static platform build information.",
             "# TYPE crisisweave_platform_info gauge",
@@ -93,6 +105,13 @@ class MetricsRegistry:
             "# HELP crisisweave_platform_worksites_up Worksite service health.",
             "# TYPE crisisweave_platform_worksites_up gauge",
             f"crisisweave_platform_worksites_up {1 if worksites_ok else 0}",
+            "# HELP crisisweave_platform_data_volume_bytes Data-volume capacity by fixed measure.",
+            "# TYPE crisisweave_platform_data_volume_bytes gauge",
+            f'crisisweave_platform_data_volume_bytes{{measure="total"}} {disk_total}',
+            f'crisisweave_platform_data_volume_bytes{{measure="free"}} {disk_free}',
+            "# HELP crisisweave_platform_data_volume_free_ratio Fraction of data-volume bytes free.",
+            "# TYPE crisisweave_platform_data_volume_free_ratio gauge",
+            f"crisisweave_platform_data_volume_free_ratio {disk_free_ratio:.6f}",
         ]
         return "\n".join(lines) + "\n"
 
@@ -141,11 +160,21 @@ class MetricsPlatformHandler(PlatformHandler):
             return None
         return principal
 
+    def _disk_usage(self) -> tuple[int, int]:
+        try:
+            usage = shutil.disk_usage(Path(self.db.db_path).parent)
+            return int(usage.total), int(usage.free)
+        except (OSError, AttributeError):
+            return 0, 0
+
     def _send_metrics(self):
+        disk_total, disk_free = self._disk_usage()
         text = self.metrics.render(
             db_health=self.db.health(),
             worksites_ok=self.worksites.health(),
             worker_limit=self.server.max_workers,
+            disk_total_bytes=disk_total,
+            disk_free_bytes=disk_free,
         )
         body = text.encode("utf-8")
         self.send_response(200)
