@@ -10,9 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CW_HTTP_SOCKET_TIMEOUT=10
 
 WORKDIR /app
-COPY crisisweave_platform.py prometheus_server.py server_runtime.py admin.html /app/
+COPY crisisweave_platform.py prometheus_server.py server_runtime.py audit_guard.py admin.html /app/
 RUN useradd --create-home --uid 10001 crisisweave && mkdir -p /data /feeds && chown -R crisisweave:crisisweave /data /app
 USER crisisweave
 VOLUME ["/data"]
 EXPOSE 8080
-CMD ["python", "prometheus_server.py"]
+CMD ["sh", "-c", "python audit_guard.py install >/dev/null && exec python prometheus_server.py"]
