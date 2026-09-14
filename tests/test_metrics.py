@@ -58,8 +58,12 @@ class MetricsTests(unittest.TestCase):
         self.assertIn('crisisweave_platform_database_healthy{database="platform"} 1', text)
         self.assertIn("crisisweave_platform_worksites_up 1", text)
         self.assertIn('crisisweave_platform_http_responses_total{status_class="2xx"} 1', text)
+        self.assertRegex(text, r'crisisweave_platform_data_volume_bytes\{measure="total"\} [1-9][0-9]*')
+        self.assertRegex(text, r'crisisweave_platform_data_volume_bytes\{measure="free"\} [1-9][0-9]*')
+        self.assertRegex(text, r'crisisweave_platform_data_volume_free_ratio 0\.[0-9]+|crisisweave_platform_data_volume_free_ratio 1\.000000')
         for sensitive_label in ("principal=", "organisation=", "worksite=", "token=", "path="):
             self.assertNotIn(sensitive_label, text)
+        self.assertNotIn(str(Path(self.tmp.name)), text)
 
     def test_metrics_endpoint_does_not_require_application_bearer_token(self):
         status, _, text = self.read("/metrics")
