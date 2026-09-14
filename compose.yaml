@@ -1,0 +1,28 @@
+services:
+  platform:
+    build: .
+    restart: unless-stopped
+    environment:
+      CW_TOKEN_PEPPER: ${CW_TOKEN_PEPPER:?CW_TOKEN_PEPPER is required}
+      CW_WORKSITES_URL: ${CW_WORKSITES_URL:-http://worksites:8787}
+      CW_WORKSITES_TOKEN: ${CW_WORKSITES_TOKEN:-}
+      CW_DB: /data/platform.db
+      CW_PRIVATE_DB: /data/private.db
+      CW_VERIFIED_FEED: /feeds/verified.jsonl
+      CW_ALERTS_FEED: /feeds/alerts.jsonl
+      CW_HOST: 0.0.0.0
+      CW_PORT: 8080
+      CW_RATE_LIMIT_PER_MINUTE: ${CW_RATE_LIMIT_PER_MINUTE:-120}
+    volumes:
+      - platform-data:/data
+      - ${CW_FEED_DIR:-./feeds}:/feeds:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  platform-data:

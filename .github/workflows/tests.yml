@@ -1,0 +1,25 @@
+name: tests
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m py_compile crisisweave_platform.py
+      - run: python -W error::ResourceWarning -m unittest discover -s tests -v
+      - run: |
+          export CW_TOKEN_PEPPER='ci-pepper-value-that-is-long-enough-123'
+          tmp="$(mktemp -d)"
+          python crisisweave_platform.py --db "$tmp/platform.db" --private-db "$tmp/private.db" init
+          python crisisweave_platform.py --db "$tmp/platform.db" --private-db "$tmp/private.db" create-org demo "Demo Org"
+          python crisisweave_platform.py --db "$tmp/platform.db" --private-db "$tmp/private.db" create-principal admin --org demo --name "Admin" --role admin
+          python crisisweave_platform.py --db "$tmp/platform.db" --private-db "$tmp/private.db" issue-token admin | python -c "import json,sys; d=json.load(sys.stdin); assert d['token'].startswith('cw_')"
