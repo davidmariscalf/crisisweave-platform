@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - run: python -m py_compile crisisweave_platform.py prometheus_server.py server_runtime.py audit_guard.py
+      - run: python -m py_compile crisisweave_platform.py prometheus_server.py server_runtime.py audit_guard.py maintenance.py
       - run: python -W error::ResourceWarning -m unittest discover -s tests -v
       - run: |
           export CW_TOKEN_PEPPER='ci-pepper-value-that-is-long-enough-123'
@@ -25,6 +25,7 @@ jobs:
           python crisisweave_platform.py --db "$tmp/platform.db" --private-db "$tmp/private.db" create-org demo "Demo Org"
           python crisisweave_platform.py --db "$tmp/platform.db" --private-db "$tmp/private.db" create-principal admin --org demo --name "Admin" --role admin
           python crisisweave_platform.py --db "$tmp/platform.db" --private-db "$tmp/private.db" issue-token admin | python -c "import json,sys; d=json.load(sys.stdin); assert d['token'].startswith('cw_')"
+          python maintenance.py --db "$tmp/platform.db" --private-db "$tmp/private.db" --pepper "$CW_TOKEN_PEPPER" --private-retention-days 90 --token-retention-days 30 | python -c "import json,sys; d=json.load(sys.stdin); assert d['applied'] is False"
       - name: Build and smoke test container
         run: |
           docker build -t crisisweave-platform:test .
@@ -38,3 +39,4 @@ jobs:
           curl --fail --silent http://127.0.0.1:18080/metrics | grep -q 'crisisweave_platform_uptime_seconds'
           curl --fail --silent http://127.0.0.1:18080/metrics | grep -q 'crisisweave_platform_http_worker_limit 64'
           docker exec cw-platform-test python audit_guard.py verify >/dev/null
+          docker exec cw-platform-test python maintenance.py --db /data/platform.db --private-db /data/private.db --pepper 'container-ci-pepper-value-long-enough-123' >/dev/null
