@@ -144,9 +144,18 @@ export CW_ALERTS_FEED=/path/to/artifact/alerts.jsonl
 
 Volunteers intentionally do not receive incident-intelligence access by default.
 
-## Admin console
+## Operations console
 
-Open `/admin`, enter a bearer token, and connect. The token is kept only in page memory, not in cookies or `localStorage`.
+Open `/admin`, enter a bearer token, and connect. The token is kept only in page memory, not in cookies, `localStorage` or `sessionStorage`.
+
+The console now provides an operational worksite view rather than only a status counter:
+
+- coordinators/admins can assign a ready worksite to a team, release an assignment and perform server-approved lifecycle transitions
+- volunteers/viewers remain read-only because the UI follows the authenticated role and the API independently enforces `worksites:write`
+- worksite and audit values are escaped before HTML rendering
+- the panel refreshes operational state and recent audit events after each mutation
+
+The API remains the security boundary; hiding a button is never treated as authorisation.
 
 ## Backups and restore checks
 
