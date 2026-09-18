@@ -27,10 +27,10 @@ class AdminConsoleStaticTests(unittest.TestCase):
     def test_dynamic_operational_values_are_escaped(self):
         html = self.read_admin()
         self.assertIn("const esc=value=>", html)
-        self.assertIn("\${esc(w.title||w.id||'Worksite')}", html)
-        self.assertIn("\${esc(w.area||'Area not specified')}", html)
-        self.assertIn("\${esc(x.action)}", html)
-        self.assertIn("\${esc(x.target||'')}", html)
+        self.assertIn("${esc(w.title||w.id||'Worksite')}", html)
+        self.assertIn("${esc(w.area||'Area not specified')}", html)
+        self.assertIn("${esc(x.action)}", html)
+        self.assertIn("${esc(x.target||'')}", html)
 
     def test_state_actions_match_server_workflow(self):
         html = self.read_admin()
