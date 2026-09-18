@@ -1,1 +1,175 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CrisisWeave Platform</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:#09111f;color:#e8eef8}.shell{max-width:1050px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:15px;align-items:center}h1{margin:0;font-size:22px}.muted{color:#91a2bb}.login,.card{background:#101b2d;border:1px solid #293a55;border-radius:14px;padding:15px;margin-top:16px}.login{display:grid;grid-template-columns:1fr auto;gap:8px}input,button{font:inherit;border-radius:9px;border:1px solid #354864;padding:10px;background:#142238;color:#edf3fb}button{cursor:pointer;font-weight:700}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#94a8c4;margin:0 0 10px}.big{font-size:24px;font-weight:800}.row{padding:10px 0;border-top:1px solid #263750}.ok{color:#72dda1}.bad{color:#ff9b86}@media(max-width:760px){.grid{grid-template-columns:1fr}.login{grid-template-columns:1fr}}</style></head><body><div class="shell"><div class="top"><div><h1>CrisisWeave platform</h1><div class="muted">Organisation control plane</div></div><span id="status" class="muted">Not authenticated</span></div><div class="login"><input id="token" type="password" autocomplete="off" placeholder="Bearer token (kept only in page memory)"><button id="connect">Connect</button></div><div class="grid"><div class="card"><h2>Identity</h2><div id="identity" class="muted">—</div></div><div class="card"><h2>Worksites</h2><div id="worksites" class="big">—</div></div><div class="card"><h2>Health</h2><div id="health">Loading…</div></div></div><div class="card"><h2>Recent audit</h2><div id="audit" class="muted">Connect with a coordinator/admin token.</div></div></div><script>let auth='';const $=x=>document.getElementById(x);async function api(p){const r=await fetch(p,{headers:auth?{Authorization:'Bearer '+auth}:{}});let d={};try{d=await r.json()}catch(_){}if(!r.ok)throw Error(d.error||('HTTP '+r.status));return d}async function health(){try{let d=await api('/healthz');$('health').innerHTML=d.ok?'<span class="ok">Healthy</span>':'<span class="bad">Degraded</span>'}catch(e){$('health').textContent=e.message}}async function load(){auth=$('token').value.trim();$('token').value='';try{let me=await api('/api/v1/me');$('identity').textContent=`${me.display_name} · ${me.role} · ${me.organisation_id}`;$('status').innerHTML='<span class="ok">Authenticated</span>';let ws=await api('/api/v1/worksites');$('worksites').textContent=(ws.worksites||[]).length;try{let a=await api('/api/v1/audit?limit=20');$('audit').innerHTML=(a.audit||[]).map(x=>`<div class="row"><strong>${x.action}</strong> · ${x.outcome}<br><span class="muted">${x.at} · ${x.principal_id||'system'} · ${x.target||''}</span></div>`).join('')||'No audit events.'}catch(e){$('audit').textContent=e.message}}catch(e){auth='';$('status').innerHTML='<span class="bad">Authentication failed</span>';$('identity').textContent=e.message;$('worksites').textContent='—'}}$('connect').onclick=load;health();</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CrisisWeave Operations</title>
+  <style>
+    :root{color-scheme:dark;--bg:#09111f;--panel:#101b2d;--line:#293a55;--text:#e8eef8;--muted:#91a2bb;--ok:#72dda1;--bad:#ff9b86;--warn:#f0c86d}
+    *{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:var(--bg);color:var(--text)}
+    .shell{max-width:1180px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;gap:15px;align-items:center}
+    h1{margin:0;font-size:22px}.muted{color:var(--muted)}.login,.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px;margin-top:16px}
+    .login{display:grid;grid-template-columns:1fr auto;gap:8px}input,button,select{font:inherit;border-radius:9px;border:1px solid #354864;padding:10px;background:#142238;color:#edf3fb}
+    button{cursor:pointer;font-weight:700}button:disabled{opacity:.55;cursor:not-allowed}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+    .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:#94a8c4;margin:0 0 10px}.big{font-size:24px;font-weight:800}.row{padding:10px 0;border-top:1px solid #263750}
+    .ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.toolbar input{min-width:240px;flex:1}
+    .worklist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.work{border:1px solid #2b3d59;border-radius:12px;padding:13px;background:#0d1728}
+    .worktop{display:flex;justify-content:space-between;gap:10px}.work h3{font-size:15px;margin:8px 0 5px}.meta{font-size:12px;color:#9aacbf}.chips{display:flex;gap:6px;flex-wrap:wrap;margin:9px 0}
+    .chip{font-size:11px;border:1px solid #344862;border-radius:999px;padding:4px 7px;color:#bdc9d9}.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.actions button{padding:7px 9px;font-size:12px}
+    .flash{display:none;margin-top:12px;padding:10px;border-radius:10px;border:1px solid #34506d;background:#102238}.flash.show{display:block}.flash.error{border-color:#713c38;color:#ffb1a0;background:#281715}
+    @media(max-width:760px){.grid,.worklist{grid-template-columns:1fr}.login{grid-template-columns:1fr}.shell{padding:16px}.top{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div><h1>CrisisWeave operations</h1><div class="muted">Organisation control plane</div></div>
+    <span id="status" class="muted">Not authenticated</span>
+  </div>
+
+  <div class="login">
+    <input id="token" type="password" autocomplete="off" placeholder="Bearer token (kept only in page memory)">
+    <button id="connect">Connect</button>
+  </div>
+  <div id="flash" class="flash" role="status" aria-live="polite"></div>
+
+  <div class="grid">
+    <div class="card"><h2>Identity</h2><div id="identity" class="muted">—</div></div>
+    <div class="card"><h2>Open worksites</h2><div id="worksitesCount" class="big">—</div></div>
+    <div class="card"><h2>Health</h2><div id="health">Loading…</div></div>
+  </div>
+
+  <section class="card">
+    <div class="toolbar">
+      <div><h2 style="margin:0">Operational worksites</h2><div id="workRole" class="muted">Authenticate to load operational state.</div></div>
+      <input id="search" type="search" placeholder="Search worksite, area, state or team" aria-label="Search worksites">
+      <button id="refresh" disabled>Refresh</button>
+    </div>
+    <div id="worklist" class="worklist"><div class="muted">No operational data loaded.</div></div>
+  </section>
+
+  <section class="card"><h2>Recent audit</h2><div id="audit" class="muted">Connect with a coordinator/admin token.</div></section>
+</div>
+<script>
+let auth='',principal=null,currentWorksites=[],busy=false;
+const $=id=>document.getElementById(id);
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+const TRANSITIONS={
+  requested:['triaged','cancelled'],
+  triaged:['ready','cancelled'],
+  ready:['cancelled'],
+  assigned:['in_progress','cancelled'],
+  in_progress:['completed','cancelled'],
+  completed:[],
+  cancelled:[]
+};
+
+async function api(path,options={}){
+  const headers={...(options.headers||{})};
+  if(auth)headers.Authorization='Bearer '+auth;
+  if(options.body&&!headers['Content-Type'])headers['Content-Type']='application/json';
+  const response=await fetch(path,{...options,headers});
+  let data={};
+  try{data=await response.json()}catch(_){}
+  if(!response.ok)throw Error(data.error||('HTTP '+response.status));
+  return data;
+}
+function flash(message,error=false){
+  const el=$('flash');el.textContent=message;el.className='flash show'+(error?' error':'');
+  setTimeout(()=>{el.className='flash'},5000);
+}
+function canWrite(){return principal&&['admin','coordinator'].includes(principal.role)}
+function openWorksites(){return currentWorksites.filter(w=>!['completed','cancelled'].includes(w.state)).length}
+
+function workActions(work,index){
+  if(!canWrite())return '<span class="muted">Read only</span>';
+  const actions=[];
+  if(work.state==='ready')actions.push(`<button data-action="assign" data-index="${index}">Assign team</button>`);
+  if(work.state==='assigned')actions.push(`<button data-action="release" data-index="${index}">Release</button>`);
+  for(const state of (TRANSITIONS[work.state]||[])){
+    actions.push(`<button data-action="transition" data-state="${esc(state)}" data-index="${index}">→ ${esc(state.replaceAll('_',' '))}</button>`);
+  }
+  return actions.join(' ')||'<span class="muted">No state actions available</span>';
+}
+function renderWorksites(){
+  const q=$('search').value.trim().toLowerCase();
+  const filtered=currentWorksites.filter(w=>{
+    const hay=`${w.id||''} ${w.title||''} ${w.area||''} ${w.state||''} ${w.priority||''} ${w.assigned_team||''}`.toLowerCase();
+    return !q||hay.includes(q);
+  });
+  $('worksitesCount').textContent=openWorksites();
+  $('worklist').innerHTML=filtered.length?filtered.map(w=>{
+    const index=currentWorksites.indexOf(w);
+    const team=w.assigned_team?` · team ${esc(w.assigned_team)}`:'';
+    return `<article class="work"><div class="worktop"><span class="chip">${esc(w.state||'unknown')}</span><span class="chip">${esc(w.priority||'normal')}</span></div><h3>${esc(w.title||w.id||'Worksite')}</h3><div class="meta">${esc(w.area||'Area not specified')} · ${esc(w.people_needed??'—')} people${team}</div><div class="chips">${(w.skills||[]).slice(0,4).map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div><div class="actions">${workActions(w,index)}</div></article>`;
+  }).join(''):'<div class="muted">No worksites match this view.</div>';
+  $('worklist').querySelectorAll('button[data-action]').forEach(button=>button.onclick=()=>mutateWorksite(button));
+}
+async function loadWorksites(){
+  const data=await api('/api/v1/worksites');
+  currentWorksites=Array.isArray(data.worksites)?data.worksites:[];
+  renderWorksites();
+}
+async function loadAudit(){
+  try{
+    const data=await api('/api/v1/audit?limit=20');
+    const rows=Array.isArray(data.audit)?data.audit:[];
+    $('audit').innerHTML=rows.map(x=>`<div class="row"><strong>${esc(x.action)}</strong> · ${esc(x.outcome)}<br><span class="muted">${esc(x.at)} · ${esc(x.principal_id||'system')} · ${esc(x.target||'')}</span></div>`).join('')||'No audit events.';
+  }catch(error){$('audit').textContent=error.message}
+}
+async function mutateWorksite(button){
+  if(busy||!canWrite())return;
+  const work=currentWorksites[Number(button.dataset.index)];
+  if(!work)return;
+  let path='',payload={};
+  if(button.dataset.action==='assign'){
+    const team=prompt('Team ID to assign');
+    if(!team)return;
+    path=`/api/v1/worksites/${encodeURIComponent(work.id)}/assign`;payload={team_id:team};
+  }else if(button.dataset.action==='release'){
+    if(!confirm(`Release ${work.title||work.id} back to ready?`))return;
+    path=`/api/v1/worksites/${encodeURIComponent(work.id)}/release`;
+  }else if(button.dataset.action==='transition'){
+    const state=button.dataset.state;
+    const note=prompt(`Optional note for transition to ${state}`,'')??null;
+    if(note===null)return;
+    path=`/api/v1/worksites/${encodeURIComponent(work.id)}/transition`;payload={state,note};
+  }else{return}
+  busy=true;
+  document.querySelectorAll('button[data-action]').forEach(x=>x.disabled=true);
+  try{
+    await api(path,{method:'POST',body:JSON.stringify(payload)});
+    flash('Worksite updated.');
+    await Promise.all([loadWorksites(),loadAudit()]);
+  }catch(error){flash(error.message,true)}
+  finally{busy=false;renderWorksites()}
+}
+async function health(){
+  try{const data=await api('/healthz');$('health').innerHTML=data.ok?'<span class="ok">Healthy</span>':'<span class="bad">Degraded</span>'}
+  catch(error){$('health').textContent=error.message}
+}
+async function connect(){
+  auth=$('token').value.trim();$('token').value='';
+  if(!auth)return;
+  try{
+    principal=await api('/api/v1/me');
+    $('identity').textContent=`${principal.display_name} · ${principal.role} · ${principal.organisation_id}`;
+    $('status').innerHTML='<span class="ok">Authenticated</span>';
+    $('workRole').textContent=canWrite()?'Coordinator actions enabled':'Read-only operational view';
+    $('refresh').disabled=false;
+    await Promise.all([loadWorksites(),loadAudit()]);
+  }catch(error){
+    auth='';principal=null;currentWorksites=[];
+    $('status').innerHTML='<span class="bad">Authentication failed</span>';
+    $('identity').textContent=error.message;$('worksitesCount').textContent='—';
+    $('worklist').innerHTML='<div class="muted">No operational data loaded.</div>';
+    $('refresh').disabled=true;
+  }
+}
+$('connect').onclick=connect;
+$('refresh').onclick=async()=>{try{await Promise.all([loadWorksites(),loadAudit()]);flash('Operational data refreshed.')}catch(error){flash(error.message,true)}};
+$('search').oninput=renderWorksites;
+health();
+</script>
+</body>
+</html>
