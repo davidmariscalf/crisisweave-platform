@@ -215,6 +215,69 @@ class PlatformDB:
         self.audit("principal.create", "success", oid, pid, pid, {"role": role})
         return {"id": pid, "organisation_id": oid, "display_name": name, "role": role}
 
+    def bootstrap_organisation(self, oid, org_name, pid, display_name, ttl_seconds=24 * 3600):
+        oid = _safe_id(oid, "organisation id")
+        pid = _safe_id(pid, "principal id")
+        org_name = str(org_name or "").strip()
+        display_name = str(display_name or "").strip()
+        if not org_name or len(org_name) > 200:
+            raise ValueError("invalid organisation name")
+        if not display_name or len(display_name) > 200:
+            raise ValueError("invalid principal")
+        ttl = None if ttl_seconds in (None, 0) else int(ttl_seconds)
+        if ttl is not None and not 60 <= ttl <= 90 * 24 * 3600:
+            raise ValueError("token TTL must be between 60 seconds and 90 days")
+
+        token = "cw_" + secrets.token_urlsafe(32)
+        token_id = "tok_" + secrets.token_hex(8)
+        created = utcnow()
+        expires = (
+            (datetime.now(timezone.utc) + timedelta(seconds=ttl)).isoformat().replace("+00:00", "Z")
+            if ttl is not None else None
+        )
+        with self._db() as c:
+            if c.execute("SELECT 1 FROM organisations WHERE id=?", (oid,)).fetchone():
+                raise ValueError("organisation already exists")
+            if c.execute("SELECT 1 FROM principals WHERE id=?", (pid,)).fetchone():
+                raise ValueError("principal already exists")
+            c.execute(
+                "INSERT INTO organisations(id,name,created_at) VALUES(?,?,?)",
+                (oid, org_name, created),
+            )
+            c.execute(
+                "INSERT INTO principals(id,organisation_id,display_name,role,created_at) VALUES(?,?,?,?,?)",
+                (pid, oid, display_name, "admin", created),
+            )
+            c.execute(
+                "INSERT INTO tokens(id,principal_id,digest,prefix,created_at,expires_at) VALUES(?,?,?,?,?,?)",
+                (token_id, pid, self.digest(token), token[:12], created, expires),
+            )
+            audit_rows = (
+                (created, oid, None, "organisation.create", oid, "success", "{}"),
+                (created, oid, pid, "principal.create", pid, "success", json.dumps({"role": "admin"})),
+                (
+                    created, oid, pid, "token.issue", token_id, "success",
+                    json.dumps({"prefix": token[:12], "expires_at": expires}),
+                ),
+            )
+            c.executemany(
+                "INSERT INTO audit(at,organisation_id,principal_id,action,target,outcome,details) "
+                "VALUES(?,?,?,?,?,?,?)",
+                audit_rows,
+            )
+        return {
+            "organisation": {"id": oid, "name": org_name},
+            "principal": {
+                "id": pid,
+                "organisation_id": oid,
+                "display_name": display_name,
+                "role": "admin",
+            },
+            "token": token,
+            "expires_at": expires,
+            "warning": "shown once; store securely",
+        }
+
     def set_principal_active(self, pid, active: bool):
         pid = _safe_id(pid, "principal id")
         with self._db() as c:
@@ -886,6 +949,17 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
 
+    bootstrap = sub.add_parser("bootstrap")
+    bootstrap.add_argument("--org-id", required=True)
+    bootstrap.add_argument("--org-name", required=True)
+    bootstrap.add_argument("--admin-id", required=True)
+    bootstrap.add_argument("--admin-name", required=True)
+    bootstrap.add_argument(
+        "--ttl-hours", type=float,
+        default=float(os.getenv("CW_TOKEN_TTL_HOURS", "24")),
+        help="initial admin token lifetime in hours; use 0 for no expiry (default: 24)",
+    )
+
     org = sub.add_parser("create-org")
     org.add_argument("id")
     org.add_argument("name")
@@ -936,6 +1010,15 @@ def main():
 
     if args.cmd == "init":
         print(json.dumps({"ok": True, "db": args.db, "private_db": args.private_db}))
+    elif args.cmd == "bootstrap":
+        ttl = None if args.ttl_hours == 0 else int(args.ttl_hours * 3600)
+        print(json.dumps(db.bootstrap_organisation(
+            args.org_id,
+            args.org_name,
+            args.admin_id,
+            args.admin_name,
+            ttl,
+        )))
     elif args.cmd == "create-org":
         print(json.dumps(db.create_organisation(args.id, args.name)))
     elif args.cmd == "create-principal":
