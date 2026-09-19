@@ -41,16 +41,21 @@ The built-in rate limiter is per process. Multi-instance deployments need a shar
 
 ## Quick start
 
-Start `crisisweave-worksites` on `127.0.0.1:8787`, then:
+Start `crisisweave-worksites` on `127.0.0.1:8787`, then bootstrap the first organisation/admin atomically:
 
 ```bash
 export CW_TOKEN_PEPPER='replace-with-a-long-random-secret'
-python crisisweave_platform.py init
-python crisisweave_platform.py create-org demo-relief "Demo Relief"
-python crisisweave_platform.py create-principal coord-1 --org demo-relief --name "Demo Coordinator" --role coordinator
-python crisisweave_platform.py issue-token coord-1
+python crisisweave_platform.py bootstrap \
+  --org-id demo-relief \
+  --org-name "Demo Relief" \
+  --admin-id admin-1 \
+  --admin-name "Demo Administrator"
 python crisisweave_platform.py serve
 ```
+
+The bootstrap command creates the organisation, first admin principal and initial token in one database transaction. The raw token is shown once and is not stored in plaintext. If the organisation or principal already exists, bootstrap fails without creating the remaining records.
+
+Use `create-org`, `create-principal` and `issue-token` separately for later granular administration.
 
 For the same gateway plus Prometheus-compatible aggregate metrics, run:
 
