@@ -35,6 +35,9 @@ Optional:
 - `CW_HOST`
 - `CW_PORT`
 - `CW_RATE_LIMIT_PER_MINUTE`
+- `CW_TRUST_PROXY` (enable only behind a trusted reverse proxy)
+- `CW_MAX_HTTP_WORKERS`
+- `CW_HTTP_SOCKET_TIMEOUT`
 
 `CW_ALLOWED_ORIGIN` accepts a comma-separated list of exact HTTP(S) origins. Do not use `*` for the authenticated API.
 
@@ -130,3 +133,11 @@ The local bearer-token system remains useful for the MVP and machine access. A r
 ## Rollback
 
 Use immutable images tagged by commit SHA. Keep a known-good image available and snapshot databases before schema-changing releases. The platform performs additive token-table migrations for expiry/last-use metadata; still back up before deployment.
+
+
+## Docker Compose environment forwarding
+
+The Compose service explicitly forwards browser CORS and runtime-hardening variables into the container.
+This matters because values present in a host `.env` file are used for Compose substitution but are not
+automatically inherited by the container unless listed under `environment:`. In particular,
+`CW_ALLOWED_ORIGIN` must be forwarded or authenticated browser clients will fail CORS preflight.
